@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# CREDENTIALS AND PERSONAL DATA — never commit.
+# The SQLite store holds OAuth access tokens, saved delivery addresses (with
+# names, phone numbers and coordinates) and full order history.
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+# SQLite sidecars hold committed pages, so they leak exactly the same data.
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+# Default data directories, in case FOOD_CLI_DB/FOOD_CLI_HOME is pointed
+# inside the repo. The pre-rename names are kept: an existing install still
+# uses them.
+.food-cli/
+.swiggy-cli/
+food.db*
+swiggy.db*
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+token*.json
+*_tokens.json
+*credentials*
+
+# Generated UPI QR codes embed a live payment intent (payee, amount, txn ref).
+qr/
+*.qr.png
+food-media/
+swiggy-media/
+
+# Downloaded dish images
+/tmp/food-media/
+/tmp/swiggy-media/
+
+# ---------------------------------------------------------------------------
+# Local scratch and captured traffic — never part of a release, and liable to
+# contain account data.
+# ---------------------------------------------------------------------------
+capture/
+scratch/
+*.har
+*.jsonl
+profile/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp

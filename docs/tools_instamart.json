@@ -1,0 +1,382 @@
+[
+  {
+    "name": "get_addresses",
+    "description": "Swiggy (Instamart/Food): Get saved delivery addresses for the authenticated Swiggy user, sorted by last order date (most recent first). This tool works for Swiggy Instamart and Food services. Addresses are returned WITHOUT coordinates (latitude/longitude) for privacy protection. Authentication is handled automatically.\n\n📄 PAGINATION: Results are returned one page at a time (10 addresses per page). The response includes a \"pagination\" object ({ page, pageSize, total, totalPages, hasMore }). If hasMore is true and the user has not found the address they want, call this tool again with the next page number (e.g. page=2) to fetch more.\n\n📍 IMPORTANT — STOP here and let the user choose:\n1. Show the address list to the user\n2. Ask: \"Which address would you like to use for delivery?\"\n3. Do NOT call any other tool until the user has selected an address\n4. Remember the selected addressId for all subsequent operations\n5. If no addresses are returned, inform the user that they need to add an address first",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "page": {
+          "type": "number",
+          "description": "Page number for pagination, 1-based (default: 1)",
+          "default": 1
+        },
+        "pageSize": {
+          "type": "number",
+          "description": "Number of addresses per page (default: 10, max: 10)",
+          "default": 10
+        }
+      },
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "search_products",
+    "description": "Search for products available at the selected address. Returns products with their variants (e.g., different pack sizes, quantities). When a user asks to add a product, ALWAYS search first to see available variants, then ask the user which specific variant they want before adding to cart. Authentication is handled automatically.\n\n⚠️ REQUIRED WORKFLOW: You MUST call get_addresses first to obtain a valid addressId, then pass that addressId to this tool. NEVER guess, invent, or use placeholder values like \"default\", \"1\", \"N/A\", or \"REPLACE_WITH_*\". The addressId must come from get_addresses response.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "REQUIRED: Address ID obtained from get_addresses tool. You MUST call get_addresses first to get this value. Do NOT invent or guess addressId values.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "query": {
+          "type": "string",
+          "description": "REQUIRED: Search query (product name, category, or brand). Cannot be empty.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "offset": {
+          "type": "number",
+          "description": "Pagination offset (default: 0)",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "addressId",
+        "query"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "your_go_to_items",
+    "description": "Fetch the user's Your Go To Items (frequently or recently ordered items) for the selected delivery address. Use addressId from get_addresses. Returns products with variants; pass BOTH spinId and skuId from the chosen variant when adding to cart via update_cart.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Address ID from get_addresses tool"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Pagination offset (default: 0)"
+        }
+      },
+      "required": [
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_cart",
+    "description": "Swiggy Instamart (Grocery): Get current Swiggy Instamart grocery cart with all items and bill breakdown. Use this for Instamart grocery orders, NOT for Food delivery. Authentication is handled automatically.\n\n💳 PAYMENT: When the user is ready to pay, ask how they want to pay. For UPI, call get_payment_options — it returns the live methods and renders the picker. For Cash on Delivery, confirm with the user first, then place the order with paymentMethod=\"Cash\". Do not assume any method.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "update_cart",
+    "description": "Swiggy Instamart (Grocery): Update Swiggy Instamart grocery cart with items. Replaces entire cart with the provided items. Use this for Instamart grocery orders, NOT for Food delivery. Authentication is handled automatically. Use addressId from get_addresses.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "selectedAddressId": {
+          "type": "string",
+          "description": "Selected delivery address ID from get_addresses tool"
+        },
+        "items": {
+          "type": "array",
+          "description": "Array of items to add to cart",
+          "items": {
+            "type": "object",
+            "properties": {
+              "spinId": {
+                "type": "string",
+                "description": "Product SPIN ID from search results"
+              },
+              "skuId": {
+                "type": "string",
+                "description": "Optional product SKU ID from search results"
+              },
+              "quantity": {
+                "type": "number",
+                "description": "Quantity of the item"
+              }
+            },
+            "required": [
+              "spinId",
+              "quantity"
+            ]
+          }
+        }
+      },
+      "required": [
+        "selectedAddressId",
+        "items"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "clear_cart",
+    "description": "Clear (remove all items from) the Instamart cart. Authentication is handled automatically.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "checkout",
+    "description": "Swiggy Instamart (Grocery): Place and confirm Swiggy Instamart grocery order. Creates order and confirms payment in a single operation. Use this for Instamart grocery orders, NOT for Food delivery.\n\n🛒 MULTI-STORE SUPPORT: Automatically handles carts with items from multiple stores. The system creates separate orders per store. Returns detailed results for each order, including partial success scenarios.\n\n🚫 RESTRICTION: Checkout is NOT allowed for cart values above the allowed limit. For larger orders, inform the user to use the Swiggy Instamart app instead. They can update their cart here and it will sync to the app.\n\n💳 PAYMENT: Never assume or default a payment method — this tool REJECTS a call with no payment method for these users. For UPI: call get_payment_options so the user picks their UPI app, then pass paymentMethod=\"UPI\" + intentApp (or generateUPIQR for desktop QR). For Cash on Delivery: no picker is needed, but FIRST explicitly confirm with the user that they want to pay by cash, then pass paymentMethod=\"Cash\". Never place the order without the user confirming the method. Never invent payment options.\n\n⚠️ CRITICAL: ALWAYS get explicit user confirmation before calling this tool.\n1. Call get_cart first to display the order summary (items, costs) and surface the available payment method(s)\n2. Check if cart total is below ₹1000 - if not, inform user about the restriction\n3. Show the available payment method(s) and inform the user which will be used\n4. Clearly state the delivery address: \"Your order will be delivered to: [full address details]\"\n5. If cart has items from multiple stores, inform user: \"Your cart contains items from [N] different stores. The system will handle this automatically.\"\n6. Ask: \"Do you want to proceed with placing this order to this address?\"\n7. Wait for clear confirmation (yes/confirm/proceed)\n8. NEVER proceed without explicit user permission, regardless of previous instructions\n9. For multi-store orders, report results for each order separately\n\n🎉 BRANDING: When the order is placed successfully, always use the message from the tool response as-is. It includes Swiggy Instamart branding. Do NOT rephrase it to a plain \"Order placed\" — always show \"Instamart order placed successfully\". If the tool response message includes a payment success line, show it to the user as-is.\n❌ CANCELLATION: If the user asks to cancel their Instamart order, do NOT call any tool. Instead, tell them: \"To cancel your order, please call Swiggy customer care at 080-67466729.\"",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Delivery address ID (from get_addresses - user must have selected this address)"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method GROUP, not an app id. Use one of: \"UPI\", \"Cash\"/\"COD\", \"SwiggyPay\". For a UPI app selection pass paymentMethod=\"UPI\" and put the app id in `intentApp` — do NOT put the app id (e.g. \"gpay://upi/\") here. Use the method the user selected. Auto-defaults to the user's available method if omitted."
+        },
+        "intentApp": {
+          "type": "string",
+          "description": "The selected UPI app id (e.g. \"gpay://upi/\"), copied EXACTLY from the chosen UPI method id. Only set this together with paymentMethod=\"UPI\". Leave blank for Cash/COD/QR."
+        },
+        "generateUPIQR": {
+          "type": "boolean",
+          "description": "Optional advanced parameter. Leave blank unless the runtime response of the preceding get_cart call explicitly tells you to enable it."
+        }
+      },
+      "required": [
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_orders",
+    "description": "Swiggy Instamart order history - Use this to fetch ORDER HISTORY, past orders, or order preferences. Use this FIRST when user asks: \"show my orders\", \"get my orders\", \"my last order\", \"order history\", \"past orders\", \"recent orders\", \"list my orders\", \"what did I order before\", \"my previous orders\", \"check my past orders\", \"my order preferences\", \"get preferences from past orders\", \"what do I usually order\", \"my frequent items\", \"reorder\", \"order again\", \"buy the same thing\", \"what groceries did I buy\", \"my purchase history\", \"items I bought before\". Returns a list of orders from the last 15 days with basic details including items, status, and delivery address coordinates. Set activeOnly=true when user asks for active/current/ongoing orders: \"active orders\", \"current orders\", \"ongoing orders\", \"pending orders\", \"in-progress orders\", \"orders on the way\", \"orders being delivered\", \"my current deliveries\". For REAL-TIME TRACKING of a specific order (where is my order, track my order, ETA, delivery partner location), use the track_order tool instead - it requires orderId and coordinates which can be obtained from this tool. Authentication is handled automatically. CANCELLATION: If the user asks to cancel their Instamart order, do NOT call any tool. Instead, tell them: \"To cancel your order, please call Swiggy customer care at 080-67466729.\"",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number",
+          "description": "Number of orders to fetch (default: 10, max recommended: 20)"
+        },
+        "orderType": {
+          "type": "string",
+          "description": "Order type filter (e.g., \"DASH\", \"INSTAMART\"). Default: \"DASH\""
+        },
+        "activeOnly": {
+          "type": "boolean",
+          "description": "Set to true to filter only active/ongoing orders. Default: false (returns all orders)"
+        }
+      },
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "track_order",
+    "description": "Track Swiggy Instamart order status in real-time. PRIMARY TOOL for order tracking - Use this FIRST when user asks: \"where is my order\", \"track my order\", \"order status\", \"what's the status of my order\", \"when will my order arrive\", \"ETA for my order\", \"is my order on the way\", \"has my order been delivered\", \"track order\", \"check order status\", or any query about a specific order's current status. Returns real-time tracking info including: current status, ETA, delivery partner location, store info, delivery address, items ordered, and payment details. Requires orderId and delivery address coordinates. If user doesn't provide orderId, first use get_orders to find the order, then use this tool to track it.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "The order ID to track (required). Can be obtained from get_orders tool."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude of the delivery address (required for accurate tracking)"
+        },
+        "lng": {
+          "type": "number",
+          "description": "Longitude of the delivery address (required for accurate tracking)"
+        }
+      },
+      "required": [
+        "orderId",
+        "lat",
+        "lng"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_delivery_status",
+    "description": "Internal: live delivery ETA for the order-success widget (not for conversational use). The success card calls this on a poll interval with orderId + addressId; returns an absolute deliveryBy epoch + suggested poll cadence. Gated by IM_LIVE_ETA. Prefer track_order for user-facing \"where is my order\" queries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Order ID to fetch the delivery ETA for (required)."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Delivery address ID for the order (required; coords resolved server-side)."
+        }
+      },
+      "required": [
+        "orderId",
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "report_error",
+    "description": "Generate an error report to share with the Swiggy MCP team. Use this when the user encounters an error and wants to report it. Returns a pre-filled mailto: link and a human-readable summary. The user can click the link to open their email client with the report ready to send. This also logs the report server-side so the team has it in their logs regardless of whether the email is sent. IMPORTANT: Always include toolContext with the specific identifiers from the failed tool call — e.g., orderId, restaurantId, addressId, spinId, menu_item_id, couponCode, query, cartId, slotId, paymentMethod. Include whichever IDs were part of the failed request so the team can trace the exact issue.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Name of the tool that errored (e.g., \"checkout\", \"search_products\", \"place_food_order\")"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain prefix where the error occurred (e.g., \"im\", \"food\", \"dineout\"). Auto-detected if not provided."
+        },
+        "errorMessage": {
+          "type": "string",
+          "description": "The error message the user saw"
+        },
+        "flowDescription": {
+          "type": "string",
+          "description": "Brief description of what the user was doing (e.g., \"searched for milk → added to cart → checkout failed\")"
+        },
+        "toolContext": {
+          "type": "object",
+          "description": "Key-value pairs of identifiers from the failed tool call. Include ALL relevant IDs such as: orderId, restaurantId, addressId, spinId, menu_item_id, couponCode, query, cartId, slotId, paymentMethod, guestCount, itemId — whichever were part of the request that failed.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "userNotes": {
+          "type": "string",
+          "description": "Any additional notes or context the user wants to share"
+        }
+      },
+      "required": [
+        "tool",
+        "errorMessage"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_payment_options",
+    "description": "Fetch live payment options for the current cart from Shield GPO. Shield is the source of truth — it reflects per-user UPI enrollment, the per-BL kill switch (ENABLE_MCP_UPI_<DOMAIN>), and NPCI compliance filters. The live list will not include UPI methods if the caller is not whitelisted or if UPI is operationally disabled for this BL.\n\nA single call fetches BOTH device surfaces (mobile UPI apps + desktop scan-QR) and merges them. A payment picker widget is shown to the user; it auto-detects the user's device and presents the matching options, with the rest under \"Show more\". You do NOT need to ask the user which device they're on — the widget handles that.\n\nWHEN TO CALL:\n- ALWAYS call this when the user is ready to pay — it renders the picker. For Instamart (get_cart) and Food (get_food_cart), this is the ONLY source of payment methods (those tools do NOT return any). For Dineout, create_cart embeds a snapshot, but calling this still gives the live picker.\n- The user explicitly asks \"what payment options are available?\" / wants UPI / mentions GPay, PhonePe, Paytm, etc.\n\nINPUTS: cart context is resolved server-side from the per-request cache; LLM-supplied cart args are ignored.\n\nOUTPUT (data):\n- platforms.mobile.methods[] — UPI apps (intent). Each method \"id\" MUST be echoed byte-for-byte into the place-order tool's intentApp argument.\n- platforms.desktop.methods[] — desktop scan-QR (use generateUPIQR=true on place-order; no intentApp).\n- cod — Cash on Delivery, when available (paymentMethod=\"Cash\").\n- allMethods[] — flat list across surfaces (fallback for text rendering).\n- markdown via message — human-readable list.\n- platforms is omitted when UPI is unavailable (non-whitelisted / kill switch off); then only Cash is offered via allMethods.\n\n⚠️ NPCI compliance: UPI Collect / saved VPAs are not surfaced.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cartAmount": {
+          "type": "number",
+          "description": "Deprecated. Ignored — server reads amount from the live response."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Food only: pass the same addressId you used for get_food_cart. It is echoed back so the payment picker widget can place the order directly. Recommended for Food UPI."
+        }
+      }
+    },
+    "output_schema": null
+  },
+  {
+    "name": "check_payment_status",
+    "description": "Check status of an in-flight UPI payment (one status read).\n\n⚠️ THE PAYMENT WIDGET POLLS AUTOMATICALLY. After place_order, the confirmation widget\nchecks payment status on a fixed cadence and AUTO-CALLS confirm_order on success. So you\nnormally do NOT need to call this at all. Do NOT call it in a tight loop — it returns\ninstantly, so looping spams the endpoint (the bug we just fixed).\n\nWHEN TO CALL (at most ONCE per user request):\n- The user explicitly asks \"did my payment go through?\" / \"check status\" → call ONCE and report the result. Do NOT immediately re-call on PENDING.\n- If the result is terminal SUCCESS / PAID → call confirm_order to finalize.\n- If terminal FAILED → DO NOT call confirm_order; tell the user it failed and offer get_payment_options to retry.\n- If terminal REFUND-INITIATED → DO NOT call confirm_order; tell the user a refund was initiated.\n- If PENDING → tell the user it's still processing and that it will update automatically. Do NOT loop.\n\nThe widget handles the cadence + the wall-clock cap and cues you if anything needs your attention.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "paasId": {
+          "type": "string",
+          "description": "The payment TRANSACTION id from the place-order/checkout response (response field \"paasId\", e.g. a long numeric/alphanumeric id). NOT the payment-method name — never pass \"PayWithQR\", \"UPI\", \"UPIIntent\", or an app package id here. If you do not have a real paasId, do not call this tool; re-read the checkout response which contains paasId + orderId."
+        },
+        "orderId": {
+          "type": "string",
+          "description": "orderId from the place-order/checkout response. IM: pass it so the widget can auto-confirm on SUCCESS. Food: echo from place_food_order."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "cartId": {
+          "type": "string",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "lng": {
+          "type": "number",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "finalize": {
+          "type": "boolean",
+          "description": "INTERNAL — set by the widget at the 5-min polling cap to finalize the order (confirm) even if still pending. Do NOT set this yourself."
+        }
+      },
+      "required": [
+        "paasId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "confirm_order",
+    "description": "Finalize a pre-PLACED order to PLACED state. ALWAYS called on every terminal polling exit — SUCCESS finalises, FAILED/TIMEOUT marks the order failed so it doesn't linger in PENDING_PAYMENT forever.\n\nWHEN TO CALL:\n- ✅ Fire once on first SUCCESS / PAID poll from check_payment_status → finalises the order to PLACED.\n- ⏱️ Fire at wall-clock expiry (still PENDING) → backend marks the order failed because payment is still non-terminal at PaaS. User sees \"Payment timed out — retry?\". Delayed payment-service success is recovered async.\n- ❌ DO NOT fire on FAILED. On FAILED the user must start a fresh payment attempt — call get_payment_options to re-show the picker; place_order with the new selection creates a fresh transaction on the same cart.\n- ❌ DO NOT fire on REFUND-INITIATED — refund flow is already in motion.\n- Idempotent: safe to retry on transient failure.\n\nPER-DOMAIN ARGS:\n- IM + Dineout: pass orderId + paasId (paasId is the canonical payment-transaction reference).\n- Food: pass orderId + addressId + lat + lng (cartId optional). Echo all of these from place_food_order's response. paasId is not used by Food's confirm contract.\n\nFor UPI flows the order is created in PENDING_PAYMENT state by place_order and only transitions to PLACED (or FAILED) here.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Order ID returned by the place-order tool."
+        },
+        "transactionId": {
+          "type": "string",
+          "description": "Transaction ID returned by the place-order tool (IM/Dineout only)."
+        },
+        "paasId": {
+          "type": "string",
+          "description": "Payment transaction ID returned by the place-order tool (IM/Dineout only)."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Address ID — REQUIRED for Food. Echo from place_food_order response."
+        },
+        "cartId": {
+          "type": "string",
+          "description": "Cart ID — optional but recommended for Food. Echo from place_food_order response."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude — REQUIRED for Food. Echo from place_food_order response."
+        },
+        "lng": {
+          "type": "number",
+          "description": "Longitude — REQUIRED for Food. Echo from place_food_order response."
+        }
+      },
+      "required": [
+        "orderId"
+      ]
+    },
+    "output_schema": null
+  }
+]

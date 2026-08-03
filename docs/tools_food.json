@@ -1,0 +1,640 @@
+[
+  {
+    "name": "get_addresses",
+    "description": "Swiggy (Instamart/Food): Get saved delivery addresses for the authenticated Swiggy user, sorted by last order date (most recent first). This tool works for Swiggy Instamart and Food services. Addresses are returned WITHOUT coordinates (latitude/longitude) for privacy protection. Authentication is handled automatically.\n\n📄 PAGINATION: Results are returned one page at a time (10 addresses per page). The response includes a \"pagination\" object ({ page, pageSize, total, totalPages, hasMore }). If hasMore is true and the user has not found the address they want, call this tool again with the next page number (e.g. page=2) to fetch more.\n\n📍 IMPORTANT — STOP here and let the user choose:\n1. Show the address list to the user\n2. Ask: \"Which address would you like to use for delivery?\"\n3. Do NOT call any other tool until the user has selected an address\n4. Remember the selected addressId for all subsequent operations\n5. If no addresses are returned, inform the user that they need to add an address first",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "page": {
+          "type": "number",
+          "description": "Page number for pagination, 1-based (default: 1)",
+          "default": 1
+        },
+        "pageSize": {
+          "type": "number",
+          "description": "Number of addresses per page (default: 10, max: 10)",
+          "default": 10
+        }
+      },
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "search_restaurants",
+    "description": "Search and order food from restaurants for delivery. PRIMARY FOOD DELIVERY SERVICE - Use this when user wants to order food, get food delivered, or search restaurants for delivery. Swiggy Food delivery service. NOT for restaurant reservations or dine-out.\n\n⚠️ REQUIRED WORKFLOW: You MUST call get_addresses first to obtain a valid addressId, then pass that addressId to this tool. NEVER guess, invent, or use placeholder values like \"default\", \"1\", or \"N/A\". The addressId must come from get_addresses response.\n\nIMPORTANT: Each restaurant in the response includes an \"availabilityStatus\" field with values \"OPEN\", \"CLOSED\", or \"UNAVAILABLE\". Always check this status before proceeding: only recommend or add items from restaurants with availabilityStatus \"OPEN\". If a restaurant is \"CLOSED\" or \"UNAVAILABLE\", inform the user and suggest open alternatives from the results.\n\nAfter showing results, let the user pick a restaurant before searching the menu. Do NOT automatically call search_menu — wait for the user to choose.\n\nIMPORTANT: When user asks for more options or different dishes after seeing search_menu results, first call get_restaurant_menu to discover available menu categories at the restaurant. Then call search_menu with a different category/dish name to show fresh results. Do NOT re-run search_menu with the exact same query — it will return identical results.\n\nDISTANCE & RELEVANCE: Results are sorted by a mix of distance, rating, and relevance. Each restaurant has a \"distanceKm\" field. When presenting results in text: (1) Prioritize nearby restaurants with good ratings first, (2) Always mention distance for far restaurants so the user can decide — e.g. \"Biryani House (8.2 km away, ~40 min delivery)\", (3) Never silently recommend a far restaurant without mentioning distance and expected delivery time.\n\nGENERIC QUERIES: When user asks generic things like \"popular restaurants\", \"best food\", \"what should I eat\", \"suggest something\" — the search API handles natural language queries with query understanding. Search with broad cuisine terms like \"biryani\", \"pizza\", \"chinese\", \"thali\" based on meal time (lunch → thali/biryani/rice, dinner → similar, snack → rolls/momos/sandwich, late night → pizza/burger). Present a curated mix of top-rated nearby options across cuisines rather than dumping raw results.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "REQUIRED: Address ID obtained from get_addresses tool. You MUST call get_addresses first to get this value. Do NOT invent or guess addressId values.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "query": {
+          "type": "string",
+          "description": "REQUIRED: Search query (restaurant name or cuisine). Cannot be empty. Examples: \"pizza\", \"biryani\", \"KFC\"",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "offset": {
+          "type": "number",
+          "description": "Pagination offset. Use nextOffset from previous response to load more results. Default: 0.",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "addressId",
+        "query"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "search_menu",
+    "description": "Search for dishes and menu items to order for food delivery. PRIMARY FOOD DELIVERY SERVICE - Use this when user wants to find specific dishes, browse menu items, see what a restaurant offers, or order food. Swiggy Food delivery. Returns items with their customizations. The text response includes variant/addon IDs that you need for update_food_cart calls. IMPORTANT: Each item has EITHER \"variations\" (legacy format) OR \"variantsV2\" (new format), never both - check which field exists and use the corresponding field when adding to cart. The addons shown are ALL possible addons for the item, but some addons are only valid for specific variant selections. When adding items to cart with customizations: (1) Add item with variants first using the SAME format (variations or variantsV2) as returned, (2) Check cart response for valid_addons to see which addons are actually available for your variant selection, (3) Then add addons from valid_addons list. Optionally scope with restaurantIdOfAddedItem. NOT for groceries or restaurant reservations.\n\n⚠️ REQUIRED WORKFLOW: You MUST call get_addresses first to obtain a valid addressId, then pass that addressId to this tool. NEVER guess, invent, or use placeholder values. The addressId must come from get_addresses response.\n\nCROSS-RESTAURANT SEARCH: When user asks for a dish, first search within the current restaurant (using restaurantIdOfAddedItem if items are in cart). If no results or poor matches, search again WITHOUT restaurantIdOfAddedItem to find the dish at other restaurants. Inform the user: \"I couldn't find that at [restaurant]. Here are options from other restaurants.\"\n\nDRILL INTO A DISH: A search WITHOUT restaurantIdOfAddedItem returns dishes across many restaurants (each line shows its \"restaurantId: <id>\"). When the user picks/opens a specific dish from those results, call search_menu again with restaurantIdOfAddedItem set to THAT dish's restaurantId — this returns the dish scoped to its restaurant with full variant/add-on details so it can be added to the cart.\n\nADDONS & CUSTOMIZATIONS: When user asks about addons or customizations for an item, use the addons data already returned in this search_menu response — do NOT call search_menu again. Present the available addon choices (name + price) in text. If the item has hasAddons=true, the addons array contains all options.\n\nMORE OPTIONS: search_menu returns paginated results. Use nextOffset from the response to load more items for the same query. For different dishes, call search_menu with a DIFFERENT query or use get_restaurant_menu to browse categories.\n\nAfter showing results, let the user review the items and confirm what to add. Do NOT automatically call update_food_cart — wait for the user to decide.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "REQUIRED: Address ID obtained from get_addresses tool. You MUST call get_addresses first to get this value. Do NOT invent or guess addressId values.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "query": {
+          "type": "string",
+          "description": "REQUIRED: Search query (dish name). Cannot be empty. Examples: \"biryani\", \"pizza margherita\", \"paneer tikka\"",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "restaurantIdOfAddedItem": {
+          "type": "string",
+          "description": "Optional restaurant ID to scope search"
+        },
+        "vegFilter": {
+          "type": "number",
+          "description": "Veg filter flag (0 or 1). Pass 1 for veg-only items. 0 or omitted returns mixed veg + non-veg. There is NO non-veg-only filter — if user asks for \"non-veg only\", pass 0 (mixed) and mention in text that you are showing all items including non-veg, since a non-veg-only filter is not available yet.",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "offset": {
+          "type": "number",
+          "description": "Pagination offset. Use nextOffset from previous response to load more results. Default: 0.",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "addressId",
+        "query"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_restaurant_menu",
+    "description": "Get the complete menu of a restaurant, paginated by category. Use this to BROWSE a restaurant menu and see what is available. This is the PRIMARY tool for showing MORE options — use page/pageSize to navigate categories when user asks for more items or wants to explore the menu. All items within each shown category are included. Returns a COMPACT view with dish names, prices, and flags (hasVariants, hasAddons). To ORDER an item, use search_menu with the item name and restaurantId to get full customization details (variants, addons).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Address ID from get_addresses tool"
+        },
+        "restaurantId": {
+          "type": "string",
+          "description": "Restaurant ID to fetch menu for (from search_restaurants)"
+        },
+        "page": {
+          "type": "number",
+          "description": "Page number for pagination (default: 1)",
+          "default": 1
+        },
+        "pageSize": {
+          "type": "number",
+          "description": "Number of categories per page (default: 5, max: 8)",
+          "default": 5
+        }
+      },
+      "required": [
+        "addressId",
+        "restaurantId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_food_cart",
+    "description": "Get current food delivery cart with all items. PRIMARY FOOD DELIVERY SERVICE - Use this to view cart contents when ordering food for delivery. Swiggy Food delivery. Response includes valid_addons field for each item which shows which addons are valid based on the selected variants. Use this to determine which addons can be added. NOT for groceries or restaurant reservations.\n\n💳 PAYMENT: When the user is ready to pay, ask how they want to pay. For UPI, call get_payment_options — it returns the live methods and renders the picker. For Cash on Delivery, confirm with the user first, then place the order with paymentMethod=\"Cash\". Do not assume any method.\n\nCOUPON NOTE: The response may include offers.coupon_applied with coupon_discount=0 — this means the coupon is auto-suggested (best available) but NOT actually applied. Do NOT tell the user a coupon is \"applied\" or show savings unless coupon_discount > 0.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Address ID to get accurate delivery charges based on location."
+        },
+        "restaurantName": {
+          "type": "string",
+          "description": "Restaurant name from search_restaurants or search_menu results. Pass this so the cart widget can display the restaurant name (the cart API does not always return it)."
+        }
+      },
+      "required": [
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "update_food_cart",
+    "description": "Add items to food delivery cart or update cart contents. PRIMARY FOOD DELIVERY SERVICE - Use this when user wants to add food items, dishes, or meals to their delivery cart. Swiggy Food delivery. Supports variants, variantsV2, and addons for customizing menu items. CRITICAL: Each menu item uses EITHER \"variants\" OR \"variantsV2\" format (check search_menu response) - use the SAME format that the item has, never both fields. IMPORTANT: Addon availability depends on variant selection - some addons are only valid for specific variant combinations. After choosing the variant for an item, check the cart response for valid_addons to see which addons are actually available. NOT for groceries or restaurant reservations.\n\n⚠️ NO WIDGET: This tool does NOT render any widget or cart UI. The user CANNOT see the cart after this call. You MUST follow up by calling get_food_cart immediately to show the updated cart to the user. Do NOT say \"your cart is shown above\" or \"cart reflected above\" — there is nothing to see until you call get_food_cart.\n\n✅ RESPONSE FORMAT: Keep your text response brief — just confirm what was updated, e.g. \"Added 2x Chicken Biryani to your cart.\" Then immediately call get_food_cart.\n\n💰 COUPON NOTE: The response may include offers.coupon_applied with coupon_discount=0 — this means the coupon is auto-suggested (best available) but NOT actually applied. Do NOT tell the user a coupon is \"applied\" unless coupon_discount > 0. Only mention savings if there is an actual discount amount.\n\nIMPORTANT — QUANTITY CHANGES FOR CUSTOMIZED ITEMS: When user taps +/- or asks to change quantity of an item that has addons or variants:\n(1) Do NOT silently replicate the same addons for the new quantity.\n(2) ASK the user: \"Would you like the same add-ons (e.g. Extra Raita, Salan) for the additional item, or different ones?\"\n(3) Also briefly mention other available addons they haven't picked yet — e.g. \"You can also add Gulab Jamun or Extra Gravy.\"\n(4) Only after the user confirms, call update_food_cart with the chosen customization.\nFor items WITHOUT addons/variants, quantity changes can be applied directly without asking.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "restaurantId": {
+          "type": "string",
+          "description": "Restaurant ID for the cart"
+        },
+        "cartItems": {
+          "type": "array",
+          "description": "Array of items to add to cart with their customizations",
+          "items": {
+            "type": "object",
+            "properties": {
+              "menu_item_id": {
+                "type": "string",
+                "description": "Menu item ID from search results"
+              },
+              "quantity": {
+                "type": "number",
+                "description": "Quantity of this item"
+              },
+              "variants": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "variation_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Variation ID (snake_case format)"
+                    },
+                    "variationId": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Variation ID (camelCase format, alternative)"
+                    },
+                    "group_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Group ID (snake_case format)"
+                    },
+                    "groupId": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Group ID (camelCase format, alternative)"
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Variant name (optional)"
+                    },
+                    "price": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Variant price (optional)"
+                    }
+                  },
+                  "required": []
+                },
+                "description": "IMPORTANT: Use ONLY if the menu item from search_menu has \"variations\" field. Each menu item has EITHER \"variations\" (use this field) OR \"variantsV2\" (use variantsV2 field below), never both. Check the search_menu response to see which format the item uses. Legacy format variants with group_id and variation_id from the variations array in menu search response."
+              },
+              "variantsV2": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "group_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Variant group ID from variantsV2 structure"
+                    },
+                    "variation_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Selected variation ID within the group"
+                    }
+                  },
+                  "required": [
+                    "group_id",
+                    "variation_id"
+                  ]
+                },
+                "description": "IMPORTANT: Use ONLY if the menu item from search_menu has \"variantsV2\" field. Each menu item has EITHER \"variations\" (use variants field above) OR \"variantsV2\" (use this field), never both. Check the search_menu response to see which format the item uses. New format variants with group_id and variation_id from the variantsV2 structure in menu search response."
+              },
+              "addons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "choice_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Addon choice ID (snake_case format)"
+                    },
+                    "choiceId": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Addon choice ID (camelCase format, alternative)"
+                    },
+                    "group_id": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Addon group ID (snake_case format)"
+                    },
+                    "groupId": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Addon group ID (camelCase format, alternative)"
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Addon name (optional)"
+                    },
+                    "price": {
+                      "type": [
+                        "string",
+                        "number"
+                      ],
+                      "description": "Addon price (optional, can be string like \"30\" or number)"
+                    }
+                  },
+                  "required": []
+                },
+                "description": "Addons - array of selected addon choices. WORKFLOW: (1) First add item with variants only, (2) Check cart response for valid_addons field which shows which addons are valid for your variant selection, (3) Then update cart with valid addons. IMPORTANT: Check minAddons and maxAddons constraints from valid_addons - maxAddons=0 or -1 means UNLIMITED addons allowed, maxAddons>0 means limited to that count. Only send up to maxAddons choices per group in a single call, otherwise the cart may reset silently."
+              }
+            },
+            "required": [
+              "menu_item_id",
+              "quantity"
+            ]
+          }
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Address ID to get accurate delivery charges based on location."
+        },
+        "restaurantName": {
+          "type": "string",
+          "description": "Restaurant name from search_restaurants or search_menu results. Pass this so the cart widget can display the restaurant name (the cart API does not always return it)."
+        },
+        "cutleryOptIn": {
+          "type": "boolean",
+          "description": "True to request cutlery, false to skip. Omit to leave preference unchanged."
+        }
+      },
+      "required": [
+        "restaurantId",
+        "cartItems",
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "flush_food_cart",
+    "description": "Clear or empty the food delivery cart. PRIMARY FOOD DELIVERY SERVICE - Use this to remove all items from the food delivery cart. Swiggy Food delivery. NOT for groceries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "place_food_order",
+    "description": "Place food delivery order and confirm order placement. PRIMARY FOOD DELIVERY SERVICE - Use this when user wants to place order, confirm order, or complete food delivery order. Swiggy Food delivery. Requires delivery address ID (coordinates are fetched automatically). NOT for groceries or restaurant reservations.\n\nRESTRICTION: Order placement is NOT allowed for cart values of ₹1000 or more. This is because MCP is currently in beta and is being used strictly for testing purposes. For larger orders, inform the user to use the Swiggy Food app instead to place the order directly.\n\n💳 PAYMENT: Never assume or default a payment method — this tool REJECTS a call with no payment method for these users. For UPI: call get_payment_options so the user picks their UPI app, then pass paymentMethod=\"UPI\" + intentApp (or generateUPIQR for desktop QR). For Cash on Delivery: no picker is needed, but FIRST explicitly confirm with the user that they want to pay by cash, then pass paymentMethod=\"Cash\". Never place the order without the user confirming the method. Never invent payment options.\n\nCRITICAL: ALWAYS get explicit user confirmation before calling this tool.\n1. Call get_food_cart first to display the order summary (items, costs) and surface the available payment method(s)\n2. Check if cart total is below ₹1000 - if not, inform user about the restriction\n3. Show the available payment method(s) and inform the user which will be used\n4. Clearly state the delivery address: \"Your order will be delivered to: [full address details]\"\n5. Ask: \"Do you want to proceed with placing this order to this address?\"\n6. Wait for clear confirmation (yes/confirm/proceed)\n7. NEVER proceed without explicit user permission\n\n⚠️ UPI PAYMENT — DO NOT ANNOUNCE SUCCESS EARLY: If the tool response has status=\"PENDING_PAYMENT\" (UPI flow), the order is NOT placed yet — payment is still pending. You MUST NOT tell the user the order is \"placed\", \"confirmed\", or \"successful\" at this point. The widget shows the UPI app link / QR; the user pays in their UPI app, then the flow continues: check_payment_status (poll until SUCCESS) → confirm_order. ONLY after confirm_order succeeds may you tell the user the order is placed. Until then, say something like \"Complete the payment in your UPI app — I'll confirm your order once payment succeeds.\" Never claim placement on a PENDING_PAYMENT response.\n\nBRANDING (only for a truly completed order — Cash on Delivery, or UPI AFTER confirm_order succeeds): use the tool response message as-is with Swiggy branding (\"Swiggy order placed successfully\"). Do NOT apply this to a PENDING_PAYMENT response.\n\nCANCELLATION: If the user asks to cancel their food order, do NOT call any tool. Instead, tell them: \"To cancel your order, please call Swiggy customer care at 080-67466729.\"",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Address ID from the user's saved addresses (coordinates will be fetched automatically)"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "The payment method the user selected (e.g. \"UPI\" or \"Cash\"). For UPI-eligible users this is REQUIRED: first call get_payment_options and pass the method the user chose — do NOT omit it or assume a default (omission is rejected). Only legacy Cash-only users (no picker) may omit it, in which case it defaults to Cash."
+        },
+        "intentApp": {
+          "type": "string",
+          "description": "Optional advanced parameter. Leave blank unless the runtime response of the preceding get_food_cart call explicitly tells you what to pass."
+        },
+        "generateUPIQR": {
+          "type": "boolean",
+          "description": "Optional advanced parameter. Leave blank unless the runtime response of the preceding get_food_cart call explicitly tells you to enable it."
+        },
+        "noteToRestaurant": {
+          "type": "string",
+          "description": "Free-form note to the restaurant preparing the order (e.g. \"no onions\", \"less spicy\"). Not for delivery partner instructions."
+        }
+      },
+      "required": [
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "fetch_food_coupons",
+    "description": "Get available coupons and offers for food delivery order. PRIMARY FOOD DELIVERY SERVICE - Use this to find discounts, coupons, or offers when ordering food for delivery. Swiggy Food delivery. IMPORTANT: Only recommend coupons that are valid for Cash on Delivery (COD) payment. Filter out any offers that require online/card payment only. Includes best coupons, more offers, and payment offers with their applicability status, discount amounts, and terms & conditions. Requires restaurant ID and address ID (coordinates are fetched automatically).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "restaurantId": {
+          "type": "string",
+          "description": "Restaurant ID for the cart"
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Address ID where the order will be delivered (coordinates will be fetched automatically)"
+        },
+        "couponCode": {
+          "type": "string",
+          "description": "Optional coupon code to check applicability of a specific coupon"
+        }
+      },
+      "required": [
+        "restaurantId",
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "apply_food_coupon",
+    "description": "Apply coupon code or discount to food delivery order. PRIMARY FOOD DELIVERY SERVICE - Use this when user wants to apply a coupon, discount code, or offer to their food delivery order. Swiggy Food delivery. Returns the updated cart with coupon applied, including new pricing, discounts, and savings information. Requires coupon code and address ID (coordinates are fetched automatically).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "couponCode": {
+          "type": "string",
+          "description": "Coupon code to apply"
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Address ID where the order will be delivered (coordinates will be fetched automatically)"
+        },
+        "cartId": {
+          "type": "string",
+          "description": "Optional cart ID"
+        }
+      },
+      "required": [
+        "couponCode",
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_food_orders",
+    "description": "Swiggy Food order history - Use this to fetch ORDER HISTORY, past orders, or active orders. PRIMARY FOOD DELIVERY SERVICE - Use this FIRST when user asks: \"show my food orders\", \"my food order history\", \"past food orders\", \"recent food orders\", \"what did I order\", \"my previous food orders\", \"list my food orders\". Returns the user's most recent food orders (both active and delivered) ordered newest-first. Only set activeOnly=true when the user explicitly asks for ONLY current/active/in-progress/ongoing orders (e.g. \"my active food orders\", \"current food orders\", \"orders on the way\", \"orders being delivered\", \"ongoing orders right now\"); for any other generic \"show my orders\" intent, leave activeOnly unset / false. Uses addressId instead of lat/lng for privacy - coordinates are fetched internally. For REAL-TIME TRACKING of an in-progress order (where is my food, ETA), use the track_food_order tool. CANCELLATION: If the user asks to cancel their food order, do NOT call any tool. Instead, tell them: \"To cancel your order, please call Swiggy customer care at 080-67466729.\"",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "addressId": {
+          "type": "string",
+          "description": "Address ID to use for fetching orders (can be obtained from get_addresses)"
+        },
+        "activeOnly": {
+          "type": "boolean",
+          "description": "Set to true to filter only active/in-progress orders. Default: false.",
+          "default": false
+        }
+      },
+      "required": [
+        "addressId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_food_order_details",
+    "description": "Get detailed information about a specific food delivery order. PRIMARY FOOD DELIVERY SERVICE - Use this when user asks about order details, order information, or wants to see what they ordered. Swiggy Food delivery. Returns comprehensive order details including items, variants, pricing breakdown, delivery address, payment info, and order status.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Order ID to fetch details for (can be obtained from get_food_orders)"
+        }
+      },
+      "required": [
+        "orderId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "track_food_order",
+    "description": "Track food delivery order status and delivery progress. PRIMARY FOOD DELIVERY SERVICE - Use this when user asks to track order, check delivery status, or see where their food order is. Swiggy Food delivery. Returns current status, ETA, and progress for orders that are being prepared or in delivery. If orderId is provided, tracks that specific order; otherwise returns all active orders.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Optional: Specific order ID to track. If not provided, returns all active orders."
+        }
+      },
+      "required": []
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_food_delivery_status",
+    "description": "Internal: live delivery ETA for the Food order-success widget (not for conversational use). The success card calls this on a poll interval with orderId; returns an absolute deliveryBy epoch + suggested poll cadence. Gated by FOOD_LIVE_ETA. Prefer track_food_order for user-facing \"where is my order\" queries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Order ID to fetch the delivery ETA for (required)."
+        }
+      },
+      "required": [
+        "orderId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "report_error",
+    "description": "Generate an error report to share with the Swiggy MCP team. Use this when the user encounters an error and wants to report it. Returns a pre-filled mailto: link and a human-readable summary. The user can click the link to open their email client with the report ready to send. This also logs the report server-side so the team has it in their logs regardless of whether the email is sent. IMPORTANT: Always include toolContext with the specific identifiers from the failed tool call — e.g., orderId, restaurantId, addressId, spinId, menu_item_id, couponCode, query, cartId, slotId, paymentMethod. Include whichever IDs were part of the failed request so the team can trace the exact issue.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Name of the tool that errored (e.g., \"checkout\", \"search_products\", \"place_food_order\")"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain prefix where the error occurred (e.g., \"im\", \"food\", \"dineout\"). Auto-detected if not provided."
+        },
+        "errorMessage": {
+          "type": "string",
+          "description": "The error message the user saw"
+        },
+        "flowDescription": {
+          "type": "string",
+          "description": "Brief description of what the user was doing (e.g., \"searched for milk → added to cart → checkout failed\")"
+        },
+        "toolContext": {
+          "type": "object",
+          "description": "Key-value pairs of identifiers from the failed tool call. Include ALL relevant IDs such as: orderId, restaurantId, addressId, spinId, menu_item_id, couponCode, query, cartId, slotId, paymentMethod, guestCount, itemId — whichever were part of the request that failed.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "userNotes": {
+          "type": "string",
+          "description": "Any additional notes or context the user wants to share"
+        }
+      },
+      "required": [
+        "tool",
+        "errorMessage"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "get_payment_options",
+    "description": "Fetch live payment options for the current cart from Shield GPO. Shield is the source of truth — it reflects per-user UPI enrollment, the per-BL kill switch (ENABLE_MCP_UPI_<DOMAIN>), and NPCI compliance filters. The live list will not include UPI methods if the caller is not whitelisted or if UPI is operationally disabled for this BL.\n\nA single call fetches BOTH device surfaces (mobile UPI apps + desktop scan-QR) and merges them. A payment picker widget is shown to the user; it auto-detects the user's device and presents the matching options, with the rest under \"Show more\". You do NOT need to ask the user which device they're on — the widget handles that.\n\nWHEN TO CALL:\n- ALWAYS call this when the user is ready to pay — it renders the picker. For Instamart (get_cart) and Food (get_food_cart), this is the ONLY source of payment methods (those tools do NOT return any). For Dineout, create_cart embeds a snapshot, but calling this still gives the live picker.\n- The user explicitly asks \"what payment options are available?\" / wants UPI / mentions GPay, PhonePe, Paytm, etc.\n\nINPUTS: cart context is resolved server-side from the per-request cache; LLM-supplied cart args are ignored.\n\nOUTPUT (data):\n- platforms.mobile.methods[] — UPI apps (intent). Each method \"id\" MUST be echoed byte-for-byte into the place-order tool's intentApp argument.\n- platforms.desktop.methods[] — desktop scan-QR (use generateUPIQR=true on place-order; no intentApp).\n- cod — Cash on Delivery, when available (paymentMethod=\"Cash\").\n- allMethods[] — flat list across surfaces (fallback for text rendering).\n- markdown via message — human-readable list.\n- platforms is omitted when UPI is unavailable (non-whitelisted / kill switch off); then only Cash is offered via allMethods.\n\n⚠️ NPCI compliance: UPI Collect / saved VPAs are not surfaced.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cartAmount": {
+          "type": "number",
+          "description": "Deprecated. Ignored — server reads amount from the live response."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Food only: pass the same addressId you used for get_food_cart. It is echoed back so the payment picker widget can place the order directly. Recommended for Food UPI."
+        }
+      }
+    },
+    "output_schema": null
+  },
+  {
+    "name": "check_payment_status",
+    "description": "Check status of an in-flight UPI payment (one status read).\n\n⚠️ THE PAYMENT WIDGET POLLS AUTOMATICALLY. After place_order, the confirmation widget\nchecks payment status on a fixed cadence and AUTO-CALLS confirm_order on success. So you\nnormally do NOT need to call this at all. Do NOT call it in a tight loop — it returns\ninstantly, so looping spams the endpoint (the bug we just fixed).\n\nWHEN TO CALL (at most ONCE per user request):\n- The user explicitly asks \"did my payment go through?\" / \"check status\" → call ONCE and report the result. Do NOT immediately re-call on PENDING.\n- If the result is terminal SUCCESS / PAID → call confirm_order to finalize.\n- If terminal FAILED → DO NOT call confirm_order; tell the user it failed and offer get_payment_options to retry.\n- If terminal REFUND-INITIATED → DO NOT call confirm_order; tell the user a refund was initiated.\n- If PENDING → tell the user it's still processing and that it will update automatically. Do NOT loop.\n\nThe widget handles the cadence + the wall-clock cap and cues you if anything needs your attention.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "paasId": {
+          "type": "string",
+          "description": "The payment TRANSACTION id from the place-order/checkout response (response field \"paasId\", e.g. a long numeric/alphanumeric id). NOT the payment-method name — never pass \"PayWithQR\", \"UPI\", \"UPIIntent\", or an app package id here. If you do not have a real paasId, do not call this tool; re-read the checkout response which contains paasId + orderId."
+        },
+        "orderId": {
+          "type": "string",
+          "description": "orderId from the place-order/checkout response. IM: pass it so the widget can auto-confirm on SUCCESS. Food: echo from place_food_order."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "cartId": {
+          "type": "string",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "lng": {
+          "type": "number",
+          "description": "Food only: echo from place_food_order — passed through for auto-confirm."
+        },
+        "finalize": {
+          "type": "boolean",
+          "description": "INTERNAL — set by the widget at the 5-min polling cap to finalize the order (confirm) even if still pending. Do NOT set this yourself."
+        }
+      },
+      "required": [
+        "paasId"
+      ]
+    },
+    "output_schema": null
+  },
+  {
+    "name": "confirm_order",
+    "description": "Finalize a pre-PLACED order to PLACED state. ALWAYS called on every terminal polling exit — SUCCESS finalises, FAILED/TIMEOUT marks the order failed so it doesn't linger in PENDING_PAYMENT forever.\n\nWHEN TO CALL:\n- ✅ Fire once on first SUCCESS / PAID poll from check_payment_status → finalises the order to PLACED.\n- ⏱️ Fire at wall-clock expiry (still PENDING) → backend marks the order failed because payment is still non-terminal at PaaS. User sees \"Payment timed out — retry?\". Delayed payment-service success is recovered async.\n- ❌ DO NOT fire on FAILED. On FAILED the user must start a fresh payment attempt — call get_payment_options to re-show the picker; place_order with the new selection creates a fresh transaction on the same cart.\n- ❌ DO NOT fire on REFUND-INITIATED — refund flow is already in motion.\n- Idempotent: safe to retry on transient failure.\n\nPER-DOMAIN ARGS:\n- IM + Dineout: pass orderId + paasId (paasId is the canonical payment-transaction reference).\n- Food: pass orderId + addressId + lat + lng (cartId optional). Echo all of these from place_food_order's response. paasId is not used by Food's confirm contract.\n\nFor UPI flows the order is created in PENDING_PAYMENT state by place_order and only transitions to PLACED (or FAILED) here.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Order ID returned by the place-order tool."
+        },
+        "transactionId": {
+          "type": "string",
+          "description": "Transaction ID returned by the place-order tool (IM/Dineout only)."
+        },
+        "paasId": {
+          "type": "string",
+          "description": "Payment transaction ID returned by the place-order tool (IM/Dineout only)."
+        },
+        "addressId": {
+          "type": "string",
+          "description": "Address ID — REQUIRED for Food. Echo from place_food_order response."
+        },
+        "cartId": {
+          "type": "string",
+          "description": "Cart ID — optional but recommended for Food. Echo from place_food_order response."
+        },
+        "lat": {
+          "type": "number",
+          "description": "Latitude — REQUIRED for Food. Echo from place_food_order response."
+        },
+        "lng": {
+          "type": "number",
+          "description": "Longitude — REQUIRED for Food. Echo from place_food_order response."
+        }
+      },
+      "required": [
+        "orderId"
+      ]
+    },
+    "output_schema": null
+  }
+]
